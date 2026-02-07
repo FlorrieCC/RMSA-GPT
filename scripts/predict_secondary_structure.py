@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 
 import fm
 from msa_transformer import MSABertConfig, MSABertForPretrain
+import json
 
 def set_seed(seed):
     """Set random seed for reproducibility."""
@@ -134,12 +135,12 @@ def predict(model, bert_model, linear, resnet, dataloader, output_dir, threshold
     return run_dir
 
 if __name__=='__main__':
+
     parser = argparse.ArgumentParser(description="Predict secondary structure from a3m inputs")
     parser.add_argument("--input_a3m", default="../example_data", help="Directory containing .a3m files")
     parser.add_argument("--output_dir", default="../output_ss", help="Directory to save predictions")
     parser.add_argument("--device", default="cpu", help="Device to run on, e.g. cpu or cuda:0")
-    parser.add_argument("--pretrained_res", default="../pretrained/res_model_uu_1226.pth", help="Path to resnet weights")
-    parser.add_argument("--pretrained_linear", default="../pretrained/latest_linear_uu_1226.pth", help="Path to linear weights")
+    parser.add_argument("--model_path", default="../pretrained/RMSA_ss.pt", help="Path to bundled model/config/weights")
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -147,23 +148,29 @@ if __name__=='__main__':
     set_seed(SEED)
     a3m_dir = args.input_a3m
 
-    # Initialize dataset
-    dataset = RNADataLoader(a3m_dir)
-    
-    print(f"Test: {len(dataset)}")
-    test_loader = DataLoader(dataset, batch_size=1, shuffle=False,
-                            collate_fn=lambda batch: collate_fn_wrapper(batch, dataset))
-
-    model, _ = fm.downstream.build_rnafm_resnet(type="ss")
-    model = model.to(device)
-    model_config = MSABertConfig.from_json_file("../MSA_BERT/config.json")
+    # Load bundle
+    bundle = torch.load(args.model_path, map_location=device)
+    config_dict = bundle["config"]
+    model_config = MSABertConfig(**config_dict)
     alphabet_config = model_config.alphabet_config
     vocabs = alphabet_config["standard_toks"]
     for i, w in enumerate(vocabs):
         vocab_dict[w] = i + 1
-    bert_model = MSABertForPretrain.from_pretrained('../MSA_BERT')
+
+    # Initialize dataset
+    dataset = RNADataLoader(a3m_dir)
+    print(f"Test: {len(dataset)}")
+    test_loader = DataLoader(dataset, batch_size=1, shuffle=False,
+                            collate_fn=lambda batch: collate_fn_wrapper(batch, dataset))
+
+    # Build model structure
+    model, _ = fm.downstream.build_rnafm_resnet(type="ss")
+    model = model.to(device)
+    bert_model = MSABertForPretrain(model_config)
+    bert_model.load_state_dict(bundle["bert_state_dict"])
     bert_model.eval().to(device)
     linear = nn.Linear(768, 640).to(device)
+    linear.load_state_dict(bundle["linear_state_dict"])
     resnet = model.downstream_modules['pc-resnet_1_sym_first:r-ss']
     resnet.input_msa = True
     resnet.msa_embed_dim_in = resnet.embed_dim
@@ -172,8 +179,7 @@ if __name__=='__main__':
     resnet.msa_k_proj = nn.Linear(resnet.msa_embed_dim_in, resnet.msa_embed_dim_out)
     resnet.depth_reduction = 'mean'
     resnet = resnet.to(device)
+    resnet.load_state_dict(bundle["resnet_state_dict"])
 
     # Prediction only (no training or validation)
-    resnet.load_state_dict(torch.load(args.pretrained_res, map_location=device))
-    linear.load_state_dict(torch.load(args.pretrained_linear, map_location=device))
     predict(model, bert_model, linear, resnet, test_loader, args.output_dir, threshold=0.5, device=device)
