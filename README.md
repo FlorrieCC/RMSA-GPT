@@ -117,4 +117,3 @@ python generate_seq.py \
 - All scripts support `--device` (e.g., `cpu` or `cuda:0`).
 - Make sure the required model bundle files are present in the `../pretrained` directory.
 - Output directories will be created automatically if they do not exist.
-# RMSA-GPT
