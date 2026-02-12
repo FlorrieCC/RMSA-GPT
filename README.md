@@ -1,10 +1,8 @@
 # RMSA-GPT
 
 ## Environment Setup
-  
-**After configuring the environment, you must download the required model files from:**
 
-https://mycuhk-my.sharepoint.com/personal/1155210737_link_cuhk_edu_hk/_layouts/15/onedrive.aspx?id=%2Fpersonal%2F1155210737%5Flink%5Fcuhk%5Fedu%5Fhk%2FDocuments%2Fall%5Fnature%5Fdata%2FRMSA%2DGPT%2Fmodel%5Ffile&viewid=2494af49%2D1967%2D4bf8%2Da92f%2Dfcc2556b6a55
+**After configuring the environment, you must download the required model files from [here](https://mycuhk-my.sharepoint.com/:f:/g/personal/1155210737_link_cuhk_edu_hk/IgBdeIzyn2kcQIjhkNTn7vWxAZ0Hu1NJDU5SDum-yhcFMUM?e=Q20BcR)*
 
 Download the following files and place them in the `pretrained` directory:
 
