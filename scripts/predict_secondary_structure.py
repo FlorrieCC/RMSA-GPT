@@ -8,10 +8,38 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
+from types import SimpleNamespace
 
 import fm
+from fm.downstream.pairwise_predictor import PairwiseConcatWithResNet
 from msa_transformer import MSABertConfig, MSABertForPretrain
 import json
+
+
+def build_rnafm_alphabet():
+    """Build the RNA-FM tokenizer without loading RNA-FM model weights."""
+    return fm.Alphabet.from_architecture("roberta_large", theme="rna")
+
+
+def build_rmsa_resnet():
+    """Rebuild the bundled RMSA predictor head without an RNA-FM backbone."""
+    backbone_args = SimpleNamespace(embed_dim=640, attention_heads=20)
+    alphabet = build_rnafm_alphabet()
+    resnet = PairwiseConcatWithResNet(
+        backbone_args,
+        alphabet,
+        num_classes=1,
+        symmetric=True,
+        embed_reduction=128,
+        depth_reduction="mean",
+    )
+    resnet.input_msa = True
+    resnet.msa_embed_dim_in = resnet.embed_dim
+    resnet.msa_embed_dim_out = resnet.embed_dim // resnet.attention_heads
+    resnet.msa_q_proj = nn.Linear(resnet.msa_embed_dim_in, resnet.msa_embed_dim_out)
+    resnet.msa_k_proj = nn.Linear(resnet.msa_embed_dim_in, resnet.msa_embed_dim_out)
+    resnet.depth_reduction = "mean"
+    return resnet
 
 def set_seed(seed):
     """Set random seed for reproducibility."""
@@ -42,8 +70,8 @@ class RNADataLoader(Dataset):
         self._filestems = sorted(
             os.path.splitext(f)[0] for f in os.listdir(self.a3m_dir) if f.endswith(".a3m")
         )
-        # Initialize model alphabet for batch conversion
-        _, self.alphabet = fm.downstream.build_rnafm_resnet(type="ss")
+        # Build the tokenizer only; no RNA-FM checkpoint is needed for RMSA.
+        self.alphabet = build_rnafm_alphabet()
         self.batch_converter = self.alphabet.get_batch_converter()
 
     def __len__(self):
@@ -97,7 +125,7 @@ vocab_dict = {
  '.': 18, '-': 19,'<bos>':18,'<eos>':19
 }
 
-def predict(model, bert_model, linear, resnet, dataloader, output_dir, threshold=0.5, is_eval=True, device: torch.device = torch.device("cpu")):
+def predict(bert_model, linear, resnet, dataloader, output_dir, threshold=0.5, is_eval=True, device: torch.device = torch.device("cpu")):
     resnet.eval()
     linear.eval()
     bert_model.eval()
@@ -149,7 +177,7 @@ if __name__=='__main__':
     a3m_dir = args.input_a3m
 
     # Load bundle
-    bundle = torch.load(args.model_path, map_location=device)
+    bundle = torch.load(args.model_path, map_location="cpu", weights_only=True)
     config_dict = bundle["config"]
     model_config = MSABertConfig(**config_dict)
     alphabet_config = model_config.alphabet_config
@@ -163,23 +191,14 @@ if __name__=='__main__':
     test_loader = DataLoader(dataset, batch_size=1, shuffle=False,
                             collate_fn=lambda batch: collate_fn_wrapper(batch, dataset))
 
-    # Build model structure
-    model, _ = fm.downstream.build_rnafm_resnet(type="ss")
-    model = model.to(device)
+    # Build only the bundled prediction head; no RNA-FM backbone is used.
     bert_model = MSABertForPretrain(model_config)
     bert_model.load_state_dict(bundle["bert_state_dict"])
     bert_model.eval().to(device)
     linear = nn.Linear(768, 640).to(device)
     linear.load_state_dict(bundle["linear_state_dict"])
-    resnet = model.downstream_modules['pc-resnet_1_sym_first:r-ss']
-    resnet.input_msa = True
-    resnet.msa_embed_dim_in = resnet.embed_dim
-    resnet.msa_embed_dim_out = resnet.embed_dim // resnet.attention_heads
-    resnet.msa_q_proj = nn.Linear(resnet.msa_embed_dim_in, resnet.msa_embed_dim_out)
-    resnet.msa_k_proj = nn.Linear(resnet.msa_embed_dim_in, resnet.msa_embed_dim_out)
-    resnet.depth_reduction = 'mean'
-    resnet = resnet.to(device)
+    resnet = build_rmsa_resnet().to(device)
     resnet.load_state_dict(bundle["resnet_state_dict"])
 
     # Prediction only (no training or validation)
-    predict(model, bert_model, linear, resnet, test_loader, args.output_dir, threshold=0.5, device=device)
+    predict(bert_model, linear, resnet, test_loader, args.output_dir, threshold=0.5, device=device)

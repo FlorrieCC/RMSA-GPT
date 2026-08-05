@@ -11,7 +11,7 @@ from msa_transformer import MSABertConfig, MSATransformerWithGPT2Config, MSATran
 
 # Model loading function
 def load_model_bundle(model_path, device):
-    bundle = torch.load(model_path, map_location=device)
+    bundle = torch.load(model_path, map_location="cpu", weights_only=True)
 
     # Load BERT config
     alphabet_config = bundle["alphabet_config"]
@@ -28,7 +28,7 @@ def load_model_bundle(model_path, device):
     )
     msa_transformer = MSATransformerWithGPT2(msa_config)
     msa_transformer.load_state_dict(bundle["state_dict"])
-    msa_transformer = msa_transformer.to(device)
+    msa_transformer = msa_transformer.to(device).eval()
 
     # Load GPT2 tokenizer
     tmp_dir = tempfile.TemporaryDirectory()
@@ -90,13 +90,14 @@ def generate_for_file(file_name):
 
     # Generate sequences
     generated_sequences = []
-    for i in range(20):
-        o = msa_transformer.generate(input_ids=batch_tokens)
-        result = gpt2_tokenizer.decode(o[0].tolist())
-        generated_sequences.append(result)
+    with torch.inference_mode():
+        for i in range(20):
+            o = msa_transformer.generate(input_ids=batch_tokens)
+            result = gpt2_tokenizer.decode(o[0].tolist())
+            generated_sequences.append(result)
 
-        # Log output
-        print(f"Generated sequence {i+1} for {file_name}: {result}")
+            # Log output
+            print(f"Generated sequence {i+1} for {file_name}: {result}")
 
     # Save generated sequences to a new FASTA file
     with open(output_fasta_path, 'w') as fasta_file:

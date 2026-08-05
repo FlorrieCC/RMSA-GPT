@@ -14,7 +14,7 @@ class ChunkedDataset(Dataset):
     def __init__(self, original_dataset, pad_token_id=0):
         self.original_dataset = original_dataset
         self.pad_token_id = pad_token_id
-        self.chunk_size = 64
+        self.chunk_size = 128
         self.index_map = []
 
         # Build an index map to know which (d1, chunk_idx) to pick
@@ -83,7 +83,7 @@ class RNADataset(Dataset):
         file = self.data_list[index][0]
         f = open(file, "r")
         input_ids = []
-        for line in f.readlines()[:64]:
+        for line in f.readlines()[:128]:
             line_ids = []
             if not line.startswith(">"):
                 txt = line.strip()
@@ -105,7 +105,7 @@ class RNADataset(Dataset):
         }
 
 def load_bundle_and_setup_vocab(bundle_path):
-    bundle = torch.load(bundle_path, map_location="cpu")
+    bundle = torch.load(bundle_path, map_location="cpu", weights_only=True)
     config_dict = bundle["config"]
     model_config = MSABertConfig(**config_dict)
     alphabet_config = model_config.alphabet_config
@@ -202,5 +202,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
